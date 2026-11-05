@@ -54,12 +54,18 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
 .flags li{background:var(--warn);color:var(--warn-ink);border-radius:.4rem;padding:.55rem .9rem}
 .ok{color:var(--muted);margin:0}
 .note{color:var(--muted);margin:.6rem 0 0;font-size:.95rem}
+select,input[type=month]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:.4rem;padding:.3rem .5rem}
+.chips input{padding:.15rem .4rem}
+.modes{display:flex;gap:.6rem;flex-wrap:wrap;margin:1.5rem 0 0}
+.modes .tab{padding:.7rem 1.4rem;font-weight:500}
+tr.sec td{font-weight:500;color:var(--muted);background:var(--bg)}
+.chk{display:inline-flex;gap:.5rem;align-items:center;margin-bottom:.6rem}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Month-end tracker overview</h1>
-  <p class="lead">Add the month-end trackers you receive. The page reads the SUMMARY tab of each one and shows every contract side by side.</p>
+  <p class="lead">Add the month-end trackers you receive. The page reads the SUMMARY tab of each one and shows it in one of two ways: compare projects within a month, or compare the same project between two months.</p>
 
   <label class="drop" id="drop">
     <input type="file" id="file" accept=".xlsx,.xlsm,.xls" multiple>
@@ -70,16 +76,40 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
 
   <div id="out" hidden>
     <ul class="chips" id="chips"></ul>
-    <div class="block"><div class="cards" id="cards"></div></div>
-    <div class="block"><h2>Needs attention</h2><div id="flags"></div></div>
-    <div class="block"><h2>Contracts</h2><div class="scroll" id="ctr"></div></div>
-    <div class="block"><h2>Month-end adjustments</h2><div class="scroll" id="adj"></div></div>
-    <div class="block">
-      <h2>Projects</h2>
-      <div class="bar" id="tabs"></div>
-      <div class="bar"><input type="search" id="q" placeholder="Search projects" aria-label="Search projects"></div>
-      <div class="scroll" id="prj"></div>
-      <p class="note">Figures are shown in each contract's own currency. Gross profit % is worked out from revenue and cost.</p>
+    <p class="note">Each file’s month is set in the box beside its name. Change it if the guess is wrong.</p>
+    <div class="modes" role="group" aria-label="Choose a view">
+      <button type="button" class="ghost tab" id="mode1">Compare projects</button>
+      <button type="button" class="ghost tab" id="mode2">Compare months</button>
+    </div>
+
+    <div id="view1">
+      <div class="block"><div class="bar"><label for="per">Month</label><select id="per"></select></div></div>
+      <div class="cards" id="cards"></div>
+      <div class="block"><h2>Needs attention</h2><div id="flags"></div></div>
+      <div class="block"><h2>Contracts</h2><div class="scroll" id="ctr"></div></div>
+      <div class="block"><h2>Month-end adjustments</h2><div class="scroll" id="adj"></div></div>
+      <div class="block">
+        <h2>Projects</h2>
+        <div class="bar" id="tabs"></div>
+        <div class="bar"><input type="search" id="q" placeholder="Search projects" aria-label="Search projects"></div>
+        <div class="scroll" id="prj"></div>
+        <p class="note">Figures are shown in each contract’s own currency. Gross profit % is worked out from revenue and cost.</p>
+      </div>
+    </div>
+
+    <div id="view2" hidden>
+      <div class="block">
+        <h2>Compare two months</h2>
+        <div class="bar">
+          <label for="mc">Contract</label><select id="mc"></select>
+          <label for="mp">Project</label><select id="mp"></select>
+          <label for="ma">From</label><select id="ma"></select>
+          <label for="mb">To</label><select id="mb"></select>
+        </div>
+        <label class="chk"><input type="checkbox" id="hide" checked> Hide rows with no activity</label>
+        <p class="note" id="mmsg"></p>
+        <div class="scroll" id="mtbl"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -147,6 +177,15 @@ function metrics(t){
   m.nr=t[FL+'|Rat Rev'];m.nc=t[FL+'|Rat Cost'];m.ng=gp(t[FL+'|Rat GP'],m.nr,m.nc);
   return m;
 }
+var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function perLabel(p){var m=/^(\d{4})-(\d{2})$/.exec(p||'');return m?MN[+m[2]-1]+' '+m[1]:'No month'}
+function guessPeriod(name,ts){
+  var m=/(20\d{2})[-_ .]?(0[1-9]|1[0-2])(?!\d)/.exec(name);
+  if(m)return m[1]+'-'+m[2];
+  m=/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-_ .]*((?:20)?\d{2})(?!\d)/i.exec(name);
+  if(m){var y=m[2].length===2?'20'+m[2]:m[2],i=MN.map(function(x){return x.toLowerCase()}).indexOf(m[1].toLowerCase())+1;return y+'-'+('0'+i).slice(-2)}
+  var d=new Date(ts||Date.now());return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
+}
 /*PARSE_END*/
 
 var files=[],tab=0;
@@ -159,7 +198,7 @@ var TABS=[
 function tbl(box,heads,rows,total){
   box.textContent='';var t=el('table'),h=el('tr');
   heads.forEach(function(x){h.appendChild(el('th',x[0],x[1]?'n':''))});t.appendChild(h);
-  rows.forEach(function(r,ri){var tr=el('tr',undefined,(total&&ri===rows.length-1)?'tot':'');
+  rows.forEach(function(r,ri){var tr=el('tr',undefined,(total&&ri===rows.length-1)?'tot':(r.sec?'sec':''));
     r.forEach(function(c){var v=c[0],ty=c[1],td;
       if(ty==='m')td=el('td',money(v),'n'+(v<0?' neg':''));
       else if(ty==='p')td=el('td',pct(v),'n'+(v<0?' neg':''));
@@ -189,24 +228,32 @@ async function add(list){
     var r=await readFile(f);
     if(r.err){notes.push(f.name+' '+r.err+'.');continue}
     if(!r.projects.length)notes.push(f.name+' was added, but its SUMMARY tab has no projects filled in yet.');
-    files.push(r);
+    r.period=guessPeriod(f.name,f.lastModified);files.push(r);
   }
   msg.textContent=notes.join(' ');
   render();
 }
+var selPer='',selC='',selP='',selA='',selB='',mode=1,view=[];
 function render(){
   $('out').hidden=!files.length;
   if(!files.length)return;
+  var pers=Array.from(new Set(files.map(function(f){return f.period}))).sort();
+  if(pers.indexOf(selPer)<0)selPer=pers[pers.length-1];
+  var ps=$('per');ps.textContent='';
+  pers.forEach(function(p){var o=el('option',perLabel(p));o.value=p;ps.appendChild(o)});ps.value=selPer;
+  view=files.filter(function(f){return f.period===selPer});
   var ch=$('chips');ch.textContent='';
   files.forEach(function(f,i){
     var li=el('li',f.contract+' ');li.appendChild(el('small',f.projects.length+' projects'));
+    var inp=el('input');inp.type='month';inp.value=f.period;inp.setAttribute('aria-label','Month covered by '+f.file);
+    inp.addEventListener('change',function(){if(inp.value){f.period=inp.value;render()}});
+    li.appendChild(inp);
     var b=el('button','×','x');b.type='button';b.setAttribute('aria-label','Remove '+f.file);
     b.addEventListener('click',function(){files.splice(i,1);render()});
     li.appendChild(b);ch.appendChild(li)});
-  var cur={};files.forEach(function(f){cur[f.cur]=1});
-  var curs=Object.keys(cur),all={};
-  files.forEach(function(f){Object.keys(f.tot).forEach(function(k){if(f.tot[k]!=null)all[k]=(all[k]||0)+f.tot[k]})});
-  cards(metrics(all),curs);flags();contracts();adjust();projects();
+  var cur={},all={};view.forEach(function(f){cur[f.cur]=1});
+  view.forEach(function(f){Object.keys(f.tot).forEach(function(k){if(f.tot[k]!=null)all[k]=(all[k]||0)+f.tot[k]})});
+  cards(metrics(all),Object.keys(cur));flags();contracts();adjust();projects();compareMonths();applyMode();
 }
 function cards(m,curs){
   var box=$('cards');box.textContent='';
@@ -221,7 +268,7 @@ function cards(m,curs){
 }
 function flags(){
   var box=$('flags'),items=[];box.textContent='';
-  files.forEach(function(f){
+  view.forEach(function(f){
     var m=metrics(f.tot);
     if(f.check&&norm(f.check)!=='ok')items.push(f.contract+': the error check says "'+f.check+'".');
     if(f.tot.mr)items.push(f.contract+': missing revenue of '+money(f.tot.mr)+' '+f.cur+'.');
@@ -233,26 +280,26 @@ function flags(){
 }
 function contracts(){
   var rows=[],T={};
-  files.forEach(function(f){var m=metrics(f.tot);
+  view.forEach(function(f){var m=metrics(f.tot);
     rows.push([[f.contract],[f.file],[String(f.projects.length)],[f.cur],[f.check||'–'],[m.fr,'m'],[m.fg,'m'],[gpp(m.fg,m.fr),'p'],[m.lr,'m'],[m.lg,'m'],[m.nr,'m'],[m.ng,'m'],[gpp(m.ng,m.nr),'p'],[f.tot.mr,'m'],[f.tot.mc,'m']]);
     Object.keys(f.tot).forEach(function(k){if(f.tot[k]!=null)T[k]=(T[k]||0)+f.tot[k]})});
-  if(files.length>1){var m=metrics(T),np=files.reduce(function(s,f){return s+f.projects.length},0);
+  if(view.length>1){var m=metrics(T),np=view.reduce(function(s,f){return s+f.projects.length},0);
     rows.push([['Total'],[''],[String(np)],[''],[''],[m.fr,'m'],[m.fg,'m'],[gpp(m.fg,m.fr),'p'],[m.lr,'m'],[m.lg,'m'],[m.nr,'m'],[m.ng,'m'],[gpp(m.ng,m.nr),'p'],[T.mr,'m'],[T.mc,'m']])}
-  tbl($('ctr'),[['Contract'],['File'],['Projects','n'],['Currency'],['Check'],['Forecast revenue','n'],['Forecast GP','n'],['Forecast GP %','n'],['Ledger revenue','n'],['Ledger GP','n'],['Landing revenue','n'],['Landing GP','n'],['Landing GP %','n'],['Missing revenue','n'],['Missing cost','n']],rows,files.length>1);
+  tbl($('ctr'),[['Contract'],['File'],['Projects','n'],['Currency'],['Check'],['Forecast revenue','n'],['Forecast GP','n'],['Forecast GP %','n'],['Ledger revenue','n'],['Ledger GP','n'],['Landing revenue','n'],['Landing GP','n'],['Landing GP %','n'],['Missing revenue','n'],['Missing cost','n']],rows,view.length>1);
 }
 function adjust(){
   var rows=[],T={};
-  files.forEach(function(f){rows.push([[f.contract]].concat(ADJ.map(function(k){return[f.adj[k]==null?null:f.adj[k],'m']})));
+  view.forEach(function(f){rows.push([[f.contract]].concat(ADJ.map(function(k){return[f.adj[k]==null?null:f.adj[k],'m']})));
     ADJ.forEach(function(k){if(f.adj[k]!=null)T[k]=(T[k]||0)+f.adj[k]})});
-  if(files.length>1)rows.push([['Total']].concat(ADJ.map(function(k){return[T[k]==null?null:T[k],'m']})));
-  tbl($('adj'),[['Contract']].concat(ADJ.map(function(k){return[k,1]})),rows,files.length>1);
+  if(view.length>1)rows.push([['Total']].concat(ADJ.map(function(k){return[T[k]==null?null:T[k],'m']})));
+  tbl($('adj'),[['Contract']].concat(ADJ.map(function(k){return[k,1]})),rows,view.length>1);
 }
 function projects(){
   var tb=$('tabs');tb.textContent='';
   TABS.forEach(function(t,i){var b=el('button',t.n,'ghost tab');b.type='button';b.setAttribute('aria-pressed',i===tab);
     b.addEventListener('click',function(){tab=i;projects()});tb.appendChild(b)});
   var q=$('q').value.toLowerCase(),T=TABS[tab],rows=[];
-  files.forEach(function(f){f.projects.forEach(function(p){
+  view.forEach(function(f){f.projects.forEach(function(p){
     if(q&&(f.contract+' '+p.id+' '+p.name+' '+p.status).toLowerCase().indexOf(q)<0)return;
     var r=[[f.contract],[p.name],[p.id],[p.status]];
     T.c.forEach(function(c){r.push([p.v[c[0]+'|'+c[1]],'m'])});
@@ -262,12 +309,78 @@ function projects(){
   if(tab===0)heads.push(['Landing GP %',1]);
   tbl($('prj'),heads,rows,false);
 }
+function applyMode(){
+  $('view1').hidden=mode!==1;$('view2').hidden=mode!==2;
+  $('mode1').setAttribute('aria-pressed',mode===1);$('mode2').setAttribute('aria-pressed',mode===2);
+}
+function fillSel(sel,items,cur){
+  sel.textContent='';items.forEach(function(x){var o=el('option',x[1]);o.value=x[0];sel.appendChild(o)});
+  if(items.some(function(x){return x[0]===cur}))sel.value=cur;else if(items.length)sel.value=items[0][0];
+  return sel.value;
+}
+function compareMonths(){
+  var cs=Array.from(new Set(files.map(function(f){return f.contract})));
+  selC=fillSel($('mc'),cs.map(function(c){return[c,c]}),selC);
+  var cf=files.filter(function(f){return f.contract===selC});
+  var pers=Array.from(new Set(cf.map(function(f){return f.period}))).sort();
+  var pi=pers.map(function(p){return[p,perLabel(p)]});
+  selA=fillSel($('ma'),pi,selA||pers[Math.max(0,pers.length-2)]);
+  selB=fillSel($('mb'),pi,selB||pers[pers.length-1]);
+  var plist=[['','Whole contract']],seen={};
+  cf.forEach(function(f){f.projects.forEach(function(p){if(!seen[p.id]){seen[p.id]=1;plist.push([p.id,p.name+' ('+p.id+')'])}})});
+  selP=fillSel($('mp'),plist,selP);
+  var msg=$('mmsg'),box=$('mtbl');box.textContent='';
+  if(pers.length<2){msg.textContent='Add a tracker for a second month of this contract, then set the month beside each file above.';return}
+  if(selA===selB){msg.textContent='Choose two different months.';return}
+  var fA=cf.filter(function(f){return f.period===selA})[0],fB=cf.filter(function(f){return f.period===selB})[0];
+  function vals(f){if(!f)return null;if(!selP)return f.tot;var p=f.projects.filter(function(x){return x.id===selP})[0];return p?p.v:null}
+  var vA=vals(fA),vB=vals(fB),note='Figures in '+fB.cur+'.';
+  if(!vA)note+=' This project is not in the '+perLabel(selA)+' tracker.';
+  if(!vB)note+=' This project is not in the '+perLabel(selB)+' tracker.';
+  msg.textContent=note;
+  var mA=metrics(vA||{}),mB=metrics(vB||{}),hide=$('hide').checked;
+  function key(c){return c[0]?c[0]+'|'+c[1]:c[1]}
+  var SEC=[
+    ['Forecast (IPPF)',[[FC,'Revenue FC','Revenue'],[FC,'Cost FC','Cost'],[FC,'GP','Gross profit'],['','fgp','GP %']]],
+    ['Ledger revenue',REV.map(function(h){return[LR,h,h]})],
+    ['Ledger costs',COST.map(function(h){return[LC,h,h]})],
+    ['Ledger result',[[VR,'GP','Gross profit'],['','lgp','GP %'],[VR,'Delta','GP delta']]],
+    ['Final landing',[[FL,'Rat Rev','Revenue'],[FL,'Rat Cost','Cost'],[FL,'Rat GP','Gross profit'],['','ngp','GP %']]],
+    ['Checks',[['','mr','Missing revenue'],['','mc','Missing cost']]]
+  ];
+  var calc={fgp:[gpp(mA.fg,mA.fr),gpp(mB.fg,mB.fr)],lgp:[gpp(mA.lg,mA.lr),gpp(mB.lg,mB.lr)],ngp:[gpp(mA.ng,mA.nr),gpp(mB.ng,mB.nr)]};
+  var rows=[];
+  SEC.forEach(function(sc){
+    var part=[];
+    sc[1].forEach(function(c){
+      var isP=!!calc[c[1]],a,b;
+      if(isP){a=calc[c[1]][0];b=calc[c[1]][1]}else{a=vA?vA[key(c)]:null;b=vB?vB[key(c)]:null}
+      if(a==null&&b==null)return;
+      if(hide&&!a&&!b)return;
+      var d,pc=null;
+      if(isP){d=(a!=null&&b!=null)?b-a:null}
+      else{var a0=a||0,b0=b||0;d=b0-a0;pc=a0?d/Math.abs(a0)*100:null}
+      part.push([[c[2]],[a,isP?'p':'m'],[b,isP?'p':'m'],[d,isP?'p':'m'],[pc,'p']]);
+    });
+    if(part.length){var h=[[sc[0]],[''],[''],[''],['']];h.sec=true;rows.push(h);part.forEach(function(r){rows.push(r)})}
+  });
+  if(!rows.length){msg.textContent=note+' There is no activity to show for these months.';return}
+  tbl(box,[['Item'],[perLabel(selA),1],[perLabel(selB),1],['Change',1],['Change %',1]],rows,false);
+}
 var drop=$('drop'),input=$('file');
 input.addEventListener('change',function(){add(Array.prototype.slice.call(input.files));input.value=''});
 ['dragenter','dragover'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add('over')})});
 ['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove('over')})});
 drop.addEventListener('drop',function(ev){add(Array.prototype.slice.call(ev.dataTransfer.files))});
 $('q').addEventListener('input',projects);
+$('per').addEventListener('change',function(){selPer=$('per').value;render()});
+$('mc').addEventListener('change',function(){selC=$('mc').value;selP='';selA='';selB='';compareMonths()});
+$('mp').addEventListener('change',function(){selP=$('mp').value;compareMonths()});
+$('ma').addEventListener('change',function(){selA=$('ma').value;compareMonths()});
+$('mb').addEventListener('change',function(){selB=$('mb').value;compareMonths()});
+$('hide').addEventListener('change',compareMonths);
+$('mode1').addEventListener('click',function(){mode=1;applyMode()});
+$('mode2').addEventListener('click',function(){mode=2;applyMode()});
 })();
 </script>
 </body>
